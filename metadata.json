@@ -1,0 +1,8 @@
+{
+  "name": "Jewelry AI Studio",
+  "description": "High-end jewelry analysis and image generation platform. Transform phone camera photos into professional 8K marketing assets using Gemini Nano Banana technology.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

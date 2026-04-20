@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+  
+  --color-gold: #D4AF37;
+  --color-ink: #050505;
+  --color-zinc: #1A1A1A;
+  --color-text-muted: #888888;
+}
+
+@layer base {
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+  body {
+    @apply bg-ink text-white antialiased selection:bg-gold selection:text-ink;
+  }
+}
+
+.luxury-sidebar-bg {
+  background: linear-gradient(180deg, rgba(26,26,26,0.5) 0%, rgba(5,5,5,1) 100%);
+}
+
+.gold-border-glow {
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  transition: all 0.3s ease;
+}
+
+.gold-border-glow:hover {
+  border-color: var(--color-gold);
+  box-shadow: 0 0 15px rgba(212, 175, 55, 0.1);
+}
+
+.glass-card {
+  @apply bg-zinc border border-[#222] rounded-[16px];
+}
+
+.stat-val {
+  @apply font-serif italic text-white;
+}
+
+.letter-spacing-wide {
+  letter-spacing: 4px;
+}
+
+.letter-spacing-medium {
+  letter-spacing: 2px;
+}
+
