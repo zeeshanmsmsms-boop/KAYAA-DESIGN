@@ -9,6 +9,7 @@ export interface JewelryDetails {
 export interface GeneratedImage {
   id: string;
   type: 'Macro' | 'Catalog' | 'Lifestyle' | 'Model';
+  variation: number;
   url: string;
   prompt: string;
 }

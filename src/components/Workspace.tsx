@@ -62,7 +62,7 @@ export function Workspace() {
       const details = await analyzeJewelry(preview);
       setState(prev => ({ ...prev, isAnalyzing: false, analysis: details, isGenerating: true }));
 
-      // 2. Parallel Generation for 2 variations per Type
+      // 2. Sequential Generation in small batches to respect Rate Limits
       const baseTypes: ('Macro' | 'Catalog' | 'Lifestyle' | 'Model')[] = ['Macro', 'Catalog', 'Lifestyle', 'Model'];
       
       const generationTasks: { type: typeof baseTypes[number]; variation: number }[] = [];
@@ -71,38 +71,44 @@ export function Workspace() {
         generationTasks.push({ type, variation: 2 });
       });
 
-      const generationPromises = generationTasks.map(async ({ type, variation }) => {
+      // Process tasks sequentially to avoid hitting concurrency quota limits (429)
+      for (const task of generationTasks) {
         try {
-          const url = await generateJewelryImage(details, type, preview, variation);
+          const url = await generateJewelryImage(details, task.type, preview, task.variation);
           
           const newImg: GeneratedImage = {
             id: Math.random().toString(36).substr(2, 9),
-            type,
+            type: task.type,
+            variation: task.variation,
             url,
-            prompt: `${type} - Var ${variation}`
+            prompt: `${task.type} - Variation ${task.variation}`
           };
           setState(prev => ({ ...prev, images: [...prev.images, newImg] }));
-          return newImg;
+          
+          // Small delay between successful generations to breathe
+          await new Promise(r => setTimeout(r, 500));
         } catch (err: any) {
-          console.error(`Failed to generate ${type} variation ${variation}:`, err);
-          return null;
+          console.error(`Failed to generate ${task.type} variation ${task.variation}:`, err);
+          // We continue to next task instead of failing whole suite
         }
-      });
-
-      await Promise.all(generationPromises);
+      }
       
       setState(prev => ({ ...prev, isGenerating: false }));
     } catch (err: any) {
+      let errorMessage = err.message || "An unexpected error occurred in the studio pipeline.";
+      if (errorMessage.includes("429") || errorMessage.includes("quota")) {
+        errorMessage = "Your Gemini API quota has been reached for the moment. The system is attempting to throttle requests, but you may need to wait 1-2 minutes before processing another suite. Detailed quota reset schedules can be found in your Google AI Studio dashboard.";
+      }
       setState(prev => ({ 
         ...prev, 
         isAnalyzing: false, 
         isGenerating: false, 
-        error: err.message || "An unexpected error occurred in the studio pipeline." 
+        error: errorMessage
       }));
     }
   };
 
-  const handleDownload = async (url: string, type: string) => {
+  const handleDownload = async (url: string, type: string, variation: number) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -169,7 +175,7 @@ export function Workspace() {
     ctx.letterSpacing = '0px';
 
     // --- DRAW STYLE BADGE (Top Right) ---
-    const badgeText = `${type.toUpperCase()} VIEW`;
+    const badgeText = `${type.toUpperCase()} VIEW #${variation}`;
     ctx.font = `bold ${size * 0.02}px "Inter", sans-serif`;
     const badgeMetrics = ctx.measureText(badgeText);
     const badgeW = badgeMetrics.width + 24;
@@ -215,7 +221,7 @@ export function Workspace() {
     // Trigger download
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png', 1.0);
-    link.download = `KAYAA-${productCode}-${type}.png`;
+    link.download = `KAYAA-${productCode}-${type}-V${variation}.png`;
     link.click();
   };
 
@@ -439,7 +445,7 @@ export function Workspace() {
 
                 {/* 2. Style Badge (Top Right) */}
                 <div className="absolute top-6 right-6 z-20 px-3 py-1 bg-black/80 backdrop-blur-md rounded-full border border-white/10">
-                  <span className="text-[8px] uppercase tracking-[2px] text-white/60 font-bold">{img.type} View #{img.prompt.split('Var ')[1] || '1'}</span>
+                  <span className="text-[8px] uppercase tracking-[2px] text-white/60 font-bold">{img.type} View #{img.variation}</span>
                 </div>
 
                 {/* 3. Product Code (Bottom Left) */}
@@ -458,7 +464,7 @@ export function Workspace() {
                 {/* Hover Actions */}
                 <div className="absolute inset-0 z-30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 bg-ink/60">
                   <button 
-                    onClick={() => handleDownload(img.url, img.type)}
+                    onClick={() => handleDownload(img.url, img.type, img.variation)}
                     className="w-12 h-12 rounded-full bg-white text-ink flex items-center justify-center hover:scale-110 active:scale-95 transition-transform"
                     title="Download Asset"
                   >

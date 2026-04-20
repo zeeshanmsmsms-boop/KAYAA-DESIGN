@@ -6,6 +6,23 @@ import { JewelryDetails } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 /**
+ * Helper to handle retry logic for Rate Limiting (429)
+ */
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const isRateLimit = error.message?.includes("429") || error.status === "RESOURCE_EXHAUSTED" || error.name === "ResourceExhaustedError";
+    if (isRateLimit && retries > 0) {
+      console.warn(`Rate limit hit. Retrying in ${delay}ms... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return withRetry(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+
+/**
  * Analyzes a jewelry image using Gemini 3 Flash.
  * Optimized for visual feature extraction and cataloging.
  */
@@ -18,54 +35,56 @@ export async function analyzeJewelry(imageBase64: string): Promise<JewelryDetail
   const base64Data = imageBase64.includes(",") ? imageBase64.split(",")[1] : imageBase64;
   const mimeType = imageBase64.includes(";") ? imageBase64.split(";")[0].split(":")[1] : "image/jpeg";
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: [
-      {
-        parts: [
-          {
-            text: `Act as a master jeweler and gemologist. Analyze this jewelry piece. 
-            Identify:
-            1. The primary metal (e.g., 18K Yellow Gold, Platinum).
-            2. Any gemstones present (e.g., Diamond, Ruby).
-            3. The cut of the primary stone (e.g., Emerald cut, Pear cut).
-            4. The overall style (e.g., Art Deco, Minimalist).
-            5. A highly descriptive 'Artist Note' that describes the light behavior, refractions, and texture for a photographer's prompt.`,
-          },
-          {
-            inlineData: {
-              mimeType,
-              data: base64Data,
+  return withRetry(async () => {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [
+        {
+          parts: [
+            {
+              text: `Act as a master jeweler and gemologist. Analyze this jewelry piece. 
+              Identify:
+              1. The primary metal (e.g., 18K Yellow Gold, Platinum).
+              2. Any gemstones present (e.g., Diamond, Ruby).
+              3. The cut of the primary stone (e.g., Emerald cut, Pear cut).
+              4. The overall style (e.g., Art Deco, Minimalist).
+              5. A highly descriptive 'Artist Note' that describes the light behavior, refractions, and texture for a photographer's prompt.`,
             },
-          },
-        ],
-      },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          metal: { type: Type.STRING },
-          stones: { type: Type.ARRAY, items: { type: Type.STRING } },
-          cut: { type: Type.STRING },
-          style: { type: Type.STRING },
-          description: { type: Type.STRING },
+            {
+              inlineData: {
+                mimeType,
+                data: base64Data,
+              },
+            },
+          ],
         },
-        required: ["metal", "stones", "cut", "style", "description"],
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            metal: { type: Type.STRING },
+            stones: { type: Type.ARRAY, items: { type: Type.STRING } },
+            cut: { type: Type.STRING },
+            style: { type: Type.STRING },
+            description: { type: Type.STRING },
+          },
+          required: ["metal", "stones", "cut", "style", "description"],
+        },
       },
-    },
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("The visual engine failed to return a valid analysis.");
+
+    try {
+      return JSON.parse(text);
+    } catch (err) {
+      console.error("Analysis Parse Error:", text);
+      throw new Error("Failed to parse the visual analysis report.");
+    }
   });
-
-  const text = response.text;
-  if (!text) throw new Error("The visual engine failed to return a valid analysis.");
-
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    console.error("Analysis Parse Error:", text);
-    throw new Error("Failed to parse the visual analysis report.");
-  }
 }
 
 /**
@@ -102,30 +121,32 @@ export async function generateJewelryImage(
   // Select the prompt based on variation (1 or 2)
   const selectedPrompt = prompts[type][variation === 1 ? 0 : 1] || prompts[type][0];
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-image",
-    contents: {
-      parts: [
-        { text: selectedPrompt },
-        { inlineData: { mimeType, data: base64Data } },
-      ],
-    },
-    config: {
-      imageConfig: {
-        aspectRatio: "1:1",
+  return withRetry(async () => {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-image",
+      contents: {
+        parts: [
+          { text: selectedPrompt },
+          { inlineData: { mimeType, data: base64Data } },
+        ],
       },
-    },
-  });
+      config: {
+        imageConfig: {
+          aspectRatio: "1:1",
+        },
+      },
+    });
 
-  // Search for the image part in candidates
-  const candidate = response.candidates?.[0];
-  if (!candidate) throw new Error("No candidates received from the imagery engine.");
+    // Search for the image part in candidates
+    const candidate = response.candidates?.[0];
+    if (!candidate) throw new Error("No candidates received from the imagery engine.");
 
-  for (const part of candidate.content.parts) {
-    if (part.inlineData) {
-      return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+    for (const part of candidate.content.parts) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
     }
-  }
 
-  throw new Error(`The imagery engine failed to generate the '${type}' asset.`);
+    throw new Error(`The imagery engine failed to generate the '${type}' asset.`);
+  });
 }
